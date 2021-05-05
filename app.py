@@ -5,7 +5,7 @@ from time import sleep
 from powerShell import runWithPowerShell
 
 
-def getAllMp4InDirs(mp4_dirs, min_size=1.2 * 1e9):
+def getAllMp4InDirs(mp4_dirs, min_size=1.5 * 1e9):
     '''
     根据路径列表,获取其中的mp4文件完整路径
     :param mp4_dirs: mp4文件存在的路径列表, 列表中每个元素都是一个完整路径
@@ -16,7 +16,8 @@ def getAllMp4InDirs(mp4_dirs, min_size=1.2 * 1e9):
     for mp4_dir in mp4_dirs:
         for root, dirs, files in os.walk(mp4_dir):
             mp4_files = [os.path.join(root, f) for f in files \
-                         if f.endswith("mp4") and os.path.getsize(os.path.join(root, f)) > 1200000000]
+                         if f.endswith("mp4") and os.path.getsize(os.path.join(root, f)) > 1200000000 \
+                         and "batch_merged" not in f]
             all_mp4_files.extend(mp4_files)
     return all_mp4_files
 
@@ -103,14 +104,28 @@ def mergeVideos(file, segment_files, merged_filename):
     for segment in segment_files:
         os.remove(segment)
 
+
+def getVideoSectionsStrategy(video_file):
+    # 获取video时长和视频长宽
+    with mpy.VideoFileClip(file) as video:
+        video_size = video.size
+        video_duration = video.duration
+    if video_duration > 1.4 *3600:
+        # 获得采样间隔时间
+        sample_time = video_duration / 100
+        return getTimeClip(20, video_duration, sample_time, 0.2)
+    else:
+        return getTimeClip(8, video_duration)
+
+    pass
+
 if __name__ == "__main__":
-    mp4_dirs = [r"F:\兴趣\图片\2020年11月", r"F:\兴趣\图片\2020年10月", r"F:\兴趣\图片\高清"]
+    mp4_dirs = [r"F:\兴趣\图片\2021年4月"]
     all_mp4_files = getAllMp4InDirs(mp4_dirs)  # 获得所有mp4文件
     for file in all_mp4_files:
-        with mpy.VideoFileClip(file) as video:
-            video_duration = video.duration
-            print("正在处理视频{0}".format(file))
-        sections = getTimeClip(8, video_duration)
+        # 打印log信息
+        print("正在处理视频{0}".format(file))
+        sections = getVideoSectionsStrategy(file)
         video_segments_files = []
         i = 1  # 从第1个片段开始
         for start_time, end_time in sections:

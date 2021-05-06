@@ -1,9 +1,12 @@
 import os
+import sys
 import math
 import moviepy.editor as mpy
 from time import sleep
 from powerShell import runWithPowerShell
 
+# 动态增加模块搜索路径
+sys.path.append(os.getcwd())
 
 def getAllMp4InDirs(mp4_dirs, min_size=1.5 * 1e9):
     '''
@@ -120,7 +123,7 @@ def getVideoSectionsStrategy(video_file):
     pass
 
 if __name__ == "__main__":
-    mp4_dirs = [r"F:\兴趣\图片\2021年4月"]
+    mp4_dirs = [r"E:\迅雷下载\其他"]
     all_mp4_files = getAllMp4InDirs(mp4_dirs)  # 获得所有mp4文件
     for file in all_mp4_files:
         # 打印log信息

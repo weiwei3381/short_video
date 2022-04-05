@@ -8,6 +8,7 @@ from powerShell import runWithPowerShell
 # 动态增加模块搜索路径
 sys.path.append(os.getcwd())
 
+
 def getAllMp4InDirs(mp4_dirs, min_size=1.5 * 1e9):
     '''
     根据路径列表,获取其中的mp4文件完整路径
@@ -34,13 +35,14 @@ def getConvertedFilename(file, addition="batch_merged"):
     return os.path.join(dirname, base + "_" + addition + ext)
 
 
-def getTimeClip(start_time=0, end_time=600, sample_rate=45, coverage=0.16):
+def getTimeClip(start_time=0, end_time=600, sample_rate=45, coverage=0.16, fixed_duration=0):
     """
     获得采样的时刻分布
     :param start_time: 采样开始时刻, 单位为秒, 默认为0, 即从一开始就采样
     :param end_time: 采样结束时刻, 单位为秒
     :param sample_rate:采样频率, 例如该值为100, 则表示每隔100秒开始采样1段, 如果共有1000秒(16分钟), 则采10个样
     :param coverage:剪辑覆盖率, 例如共1000秒,剪辑覆盖率为0.2, 那么最终只采集1000*0.2=200秒的时长
+    :param fixed_duration:固定时长, 单位为秒，如果该值大于0，则不用剪辑覆盖率，而是按照固定时长采集片段
     :return:
     """
     sections = []
@@ -53,13 +55,15 @@ def getTimeClip(start_time=0, end_time=600, sample_rate=45, coverage=0.16):
     for i in range(section_num):
         # 获得每段开始时间
         section_start_time = duration / section_num * i
-        # 获得每段用时, 先用平均时长表示
+        # 获得每段用时, 先用平均时长表示, 如果固定时长大于0，则用固定时长
         section_duration = average_section_duration
+        if fixed_duration > 0:
+            section_duration = fixed_duration
         sections.append((start_time + section_start_time, start_time + section_start_time + section_duration))
     return sections
 
 
-def clipVideo(file, start_time, end_time, i):
+def clipVideo(file, start_time, end_time, i, is_accurate=False):
     """
     从视频中抽取片段
     :param file: 待分割的视频路径,例如r'F:\兴趣\图片\VR\其他\IPVR-071\IPVR-071-C.mp4'
@@ -77,12 +81,34 @@ def clipVideo(file, start_time, end_time, i):
 -avoid_negative_ts make_zero -c copy -map '0:0' -map '0:1' -map_metadata 0 -movflags '+faststart' \
 -ignore_unknown -strict experimental -f mp4 -y '{3}'"
     # 生成命令
+    expect_duration = end_time - start_time
     clip_command = clip_comand_template.format(start_time, file, end_time - start_time, clip_video_name)
     runWithPowerShell(clip_command)  # 在powershell中运行提取视频片段的命令
-    return clip_video_name
+    # 如果不要求文件长度的精度，则直接返回文件
+    if not is_accurate:
+        return clip_video_name
+    # 要求文件长度精度，则获取生成文件长度，如果时长太长，则删除文件并跳过
+    file_duration = getVideoDuration(clip_video_name)  # 文件长度
+    if file_duration < (2 * expect_duration):
+        return clip_video_name
+    os.remove(clip_video_name)
+    return None
 
 
-def mergeVideos(file, segment_files, merged_filename):
+def sort_shuffle(l, circle=3):
+    new_l = []
+    for start_i in range(circle):
+        i = start_i
+        while (1):
+            if i < len(l):
+                new_l.append(l[i])
+                i += circle
+            else:
+                break
+    return new_l
+
+
+def mergeVideos(file, segment_files, merged_filename, is_random=False):
     """
     批量合并文件
     :param file: 原始文件位置
@@ -90,6 +116,9 @@ def mergeVideos(file, segment_files, merged_filename):
     :param merged_filename: 合并的文件名, 为完整路径
     :return:
     """
+    if is_random:
+        # random.shuffle(segment_files)
+        segment_files = sort_shuffle(segment_files)
     dirname, filename = os.path.split(file)
     merge_file_name = "merge_list.txt"
     # 得到合并列表txt的完整路径
@@ -108,34 +137,55 @@ def mergeVideos(file, segment_files, merged_filename):
         os.remove(segment)
 
 
-def getVideoSectionsStrategy(video_file):
+def getVideoDuration(video_file):
+    """
+    获取视频长度
+    :param video_file: 视频文件
+    :return:
+    """
+    video_duration = 0
     # 获取video时长和视频长宽
-    with mpy.VideoFileClip(file) as video:
+    with mpy.VideoFileClip(video_file) as video:
+        video_duration = video.duration
+    return video_duration
+
+
+def getVideoSectionsStrategy(video_file, is_random=False):
+    """
+    获取视频策略，如果视频时长大于
+    :param video_file:
+    :return:
+    """
+    # 获取video时长和视频长宽
+    with mpy.VideoFileClip(video_file) as video:
         video_size = video.size
         video_duration = video.duration
-    if video_duration > 1.4 *3600:
-        # 获得采样间隔时间
+    if is_random:
+        sample_time = video_duration / 80
+        return getTimeClip(60, video_duration - 30, sample_time, fixed_duration=5)
+    if video_duration > 1.4 * 3600:
+        # 如果视频时长大于1小时24分钟，则应该是普通片，则将其分为100段，获得采样间隔时间
         sample_time = video_duration / 100
         return getTimeClip(20, video_duration, sample_time, 0.2)
     else:
         return getTimeClip(8, video_duration)
 
-    pass
 
 if __name__ == "__main__":
-    mp4_dirs = [r"E:\迅雷下载\其他"]
+    mp4_dirs = [r"F:\other\兴趣\图片\VR\新建文件夹"]
+    is_random = True  # 是否随机，像预告片那样进行切割
     all_mp4_files = getAllMp4InDirs(mp4_dirs)  # 获得所有mp4文件
     for file in all_mp4_files:
         # 打印log信息
         print("正在处理视频{0}".format(file))
-        sections = getVideoSectionsStrategy(file)
+        sections = getVideoSectionsStrategy(file, is_random=is_random)
         video_segments_files = []
         i = 1  # 从第1个片段开始
         for start_time, end_time in sections:
             # 抽取视频片段
-            segment_file = clipVideo(file, start_time, end_time, i)
-            video_segments_files.append(segment_file)
+            segment_file = clipVideo(file, start_time, end_time, i, is_accurate=is_random)
+            if segment_file: video_segments_files.append(segment_file)
             i += 1
         # 合成整个视频
-        converted_filename = getConvertedFilename(file)  # 获得转换后的文件完整路径
-        mergeVideos(file, video_segments_files, converted_filename)
+        converted_filename = getConvertedFilename(file, "预告片")  # 获得转换后的文件完整路径
+        mergeVideos(file, video_segments_files, converted_filename, is_random=is_random)
